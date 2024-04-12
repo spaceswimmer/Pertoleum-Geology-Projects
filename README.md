@@ -32,6 +32,7 @@ The projects are implemented using python, sklearn, numpy, matplotlib, seaborn, 
    e. **Reservoir Sample Tomography:**
       - Description: Reservoir sample tomography is considered the most accurate and functional petrophysical method for studying pore space. However, the results yield a large amount of data per sample, making processing cumbersome. This project utilizes pandas with grouping and bin container creation to effectively segment pore spaces by diameter.
       - Technologies: pandas, numpy, matplotlib
+        
    f. **Capillary Curve Modeling with Optimization:**
    - Description: Capillary curves provide essential insights for petroleum engineers to understand the height of the oil-saturated and water-saturated parts of the reservoir, crucial for reservoir development. However, manual analysis of these curves consumes a significant amount of time. There exist approximation models that involve finding coefficients using optimization methods. This project involved approximating 42 capillary curves using various models and the least squares method.
    - Technologies: scipy, numpy, pandas, matplotlib
