@@ -19,8 +19,8 @@ class AbstractModel(ABC):
         dy_dx = np.diff(self.pc)/np.diff(self.kv)
         d2y_dx2 = np.diff(dy_dx)/np.diff(self.kv[:-1])
 
-        Pd = self.pc[np.argmin(np.abs(d2y_dx2))+2]
-        return Pd + 5e-5
+        Pd = self.pc[np.argmin(np.abs(d2y_dx2))]
+        return Pd
 
     @abstractmethod
     def _compute(self):
@@ -61,18 +61,19 @@ class Kinetic(AbstractModel):
         super().__init__(kv, pc)
 
     def _compute(self, params, mask):
-        a,b = params
-        return ((self.pc[mask]-self.pc_kvo)/((self.pc_vh-self.pc[mask])*a))**(1/b)+self.kvo
+        a,b = np.round(params, decimals=5)
+        return ((self.pc[mask]-self.pc_kvo)/((self.pc_vh-self.pc[mask]+1e-5)*a))**(1/b)+self.kvo
     
     def _loss(self, params, mask):
-        a,b = params 
-        return self.kv[mask] - self._compute(params, mask)
+        a,b = np.round(params, decimals=5)
+        result = self.kv[mask] - self._compute(params, mask)
+        return result
     
     def predict(self, a=1, b=1):
         params = [a, b]
-        mask = (self.pc >= -1)
+        mask = (self.pc >= self.pc_vh)
         opt = least_squares(self._loss, params, args=[mask])
-        # mask = np.full(self.pc.shape, True)
+        mask = (self.pc > self.pc_vh)
         self.pred = self._compute(opt.x, mask)
         self.pred[self.pred>100] = 100
         self.pred[self.pred<0] = 0
