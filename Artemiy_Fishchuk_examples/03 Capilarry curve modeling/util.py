@@ -12,6 +12,7 @@ class AbstractModel(ABC):
     def _compute_params(self):
         self.pc_vh = self.__compute_pcvh()
         self.kvo = min(self.kv)
+        self.pc_kvo = self.pc[np.argmin(self.kv)]
     
     def __compute_pcvh(self):
         #Spaghetti code warning
@@ -19,23 +20,25 @@ class AbstractModel(ABC):
         d2y_dx2 = np.diff(dy_dx)/np.diff(self.kv[:-1])
 
         Pd = self.pc[np.argmin(np.abs(d2y_dx2))+2]
-        return Pd
+        return Pd + 5e-5
 
     @abstractmethod
-    def predict(self):
+    def _compute(self):
         pass
 
     @abstractmethod
     def _loss(self):
         pass
 
+    @abstractmethod
+    def predict(self):
+        pass
+
 class BruxKori(AbstractModel):
     def __init__(self, kv, pc):
         super().__init__(kv, pc)
 
-    def _compute(self, n, mask ):
-        # if not mask.all():
-        #     mask = np.full(self.pc.shape, True)
+    def _compute(self, n, mask):
         return self.kvo+(100-self.kvo)*(self.pc_vh/self.pc[mask])**(1/n)
     
     def _loss(self, n, mask):
@@ -47,9 +50,31 @@ class BruxKori(AbstractModel):
         opt = least_squares(self._loss, n_start, args=[mask])
         mask = np.full(self.pc.shape, True)
 
-        self.pred = self._compute(opt.x[0], mask)
+        self.pred = self._compute(opt.x, mask)
         self.pred[self.pred>100] = 100
         self.pred[self.pred<0] = 0
         
         return self.pred
+    
+class Kinetic(AbstractModel):
+    def __init__(self, kv, pc):
+        super().__init__(kv, pc)
 
+    def _compute(self, params, mask):
+        a,b = params
+        return ((self.pc[mask]-self.pc_kvo)/((self.pc_vh-self.pc[mask])*a))**(1/b)+self.kvo
+    
+    def _loss(self, params, mask):
+        a,b = params 
+        return self.kv[mask] - self._compute(params, mask)
+    
+    def predict(self, a=1, b=1):
+        params = [a, b]
+        mask = (self.pc >= -1)
+        opt = least_squares(self._loss, params, args=[mask])
+        # mask = np.full(self.pc.shape, True)
+        self.pred = self._compute(opt.x, mask)
+        self.pred[self.pred>100] = 100
+        self.pred[self.pred<0] = 0
+        
+        return self.pred
