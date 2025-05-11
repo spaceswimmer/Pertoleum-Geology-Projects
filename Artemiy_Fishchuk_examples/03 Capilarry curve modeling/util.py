@@ -70,12 +70,38 @@ class Kinetic(AbstractModel):
         return result
     
     def predict(self, a=1, b=1):
+        #train
         params = [a, b]
         mask = (self.pc >= self.pc_vh)
-        opt = least_squares(self._loss, params, args=[mask])
+        opt = least_squares(self._loss, params, args=[mask], bounds=((0,1), (1,10)))
+        #predict
         mask = (self.pc > self.pc_vh)
         self.pred = self._compute(opt.x, mask)
         self.pred[self.pred>100] = 100
         self.pred[self.pred<0] = 0
         
         return self.pred
+    
+class Optimal(AbstractModel):
+    def __init__(self, kv, pc):
+        super().__init__(kv, pc)
+    
+    def _compute(self, params):
+        a,b = params
+        alpha = (self.pc/a)**(1/b)
+        return (alpha * self.kvo + 100)/(1+alpha)
+    
+    def _loss(self, params):
+        return self.kv - self._compute(params)
+    
+    def predict(self, a=1, b=1):
+        #train
+        params = [a, b]
+        opt = least_squares(self._loss, params, bounds=((0,0), (1,1)))
+        #predict
+        self.pred = self._compute(opt.x)
+        self.pred[self.pred>100] = 100
+        self.pred[self.pred<0] = 0
+        
+        return self.pred
+        
