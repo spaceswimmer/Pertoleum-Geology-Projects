@@ -46,14 +46,16 @@ class BruxKori(AbstractModel):
         return self.kv[mask] - pred_kv
     
     def predict(self, n_start = 1):
+        #train
         mask = (self.pc >= self.pc_vh)
         opt = least_squares(self._loss, n_start, args=[mask])
         mask = np.full(self.pc.shape, True)
-
+        #predict
         self.pred = self._compute(opt.x, mask)
         self.pred[self.pred>100] = 100
         self.pred[self.pred<0] = 0
         
+        self.params = opt.x
         return self.pred
     
 class Kinetic(AbstractModel):
@@ -80,6 +82,7 @@ class Kinetic(AbstractModel):
         self.pred[self.pred>100] = 100
         self.pred[self.pred<0] = 0
         
+        self.params = opt.x
         return self.pred
     
 class Optimal(AbstractModel):
@@ -103,5 +106,48 @@ class Optimal(AbstractModel):
         self.pred[self.pred>100] = 100
         self.pred[self.pred<0] = 0
         
+        self.params = opt.x
         return self.pred
+
+class Tomira(AbstractModel):
+    def __init__(self, kv, pc):
+        super().__init__(kv, pc)
+    
+    def _compute(self, G, mask):
+        return self.kvo + (100-self.kvo)*(1- np.exp(G/np.log(self.pc_vh/(self.pc[mask] + 1e-6))))
+    
+    def _loss(self, G, mask):
+        return self.kv[mask] - self._compute(G, mask)
+    
+    def predict(self, G=1):
+        #train
+        mask = (self.pc >= self.pc_vh)
+        opt = least_squares(self._loss, G, args=[mask])
+        #predict
+        self.pred = self._compute(opt.x, mask)
+        self.pred[self.pred>100] = 100
+        self.pred[self.pred<0] = 0
         
+        return self.pred
+    
+class Trigonometric(AbstractModel):
+    def __init__(self, kv, pc):
+        super().__init__(kv, pc)
+    
+    def _compute(self, params):
+        A, B, C = params
+        return (1/2-np.arctan((self.pc-A)/B)/np.pi)**(1/C)
+    
+    def _loss(self, params):
+        return self.kv - self._compute(params)
+    
+    def predict(self, A=2, B=2, C=2):
+        #train
+        params = [A, B, C]
+        opt = least_squares(self._loss, params)
+        #predict
+        self.pred = self._compute(opt.x)
+        self.pred[self.pred>100] = 100
+        self.pred[self.pred<0] = 0
+        
+        return self.pred
