@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from scipy.optimize import least_squares
+from scipy.optimize import least_squares, curve_fit
 import sys
 
 class AbstractModel(ABC):
@@ -144,7 +144,8 @@ class Trigonometric(AbstractModel):
     def predict(self, A=2, B=2, C=2):
         #train
         params = [A, B, C]
-        opt = least_squares(self._loss, params)
+        opt = least_squares(self._loss, params, bounds=([0, 0.01, 0.1], [10, 10, 10]))
+        # opt, _ = curve_fit(_compute())
         #predict
         self.pred = self._compute(opt.x)
         self.pred[self.pred>100] = 100
