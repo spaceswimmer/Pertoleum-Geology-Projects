@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from scipy.optimize import least_squares, curve_fit
+from scipy.optimize import least_squares, curve_fit, minimize
 import sys
 
 class AbstractModel(ABC):
@@ -31,59 +31,61 @@ class AbstractModel(ABC):
         pass
 
     @abstractmethod
-    def predict(self):
+    def fit(self):
         pass
+
+    def predict(self, params, mask = None):
+        return self._compute(params, mask)
 
 class BruxKori(AbstractModel):
     def __init__(self, kv, pc):
         super().__init__(kv, pc)
 
     def _compute(self, n, mask):
+        if mask.any() == None:
+            mask = np.full(self.pc.shape, True)
+
         return self.kvo+(100-self.kvo)*(self.pc_vh/self.pc[mask])**(1/n)
     
     def _loss(self, n, mask):
         pred_kv = self._compute(n, mask)
         return self.kv[mask] - pred_kv
     
-    def predict(self, n_start = 1):
+    def fit(self, n_start = 1):
         #train
         mask = (self.pc >= self.pc_vh)
         opt = least_squares(self._loss, n_start, args=[mask])
-        mask = np.full(self.pc.shape, True)
         #predict
-        self.pred = self._compute(opt.x, mask)
-        self.pred[self.pred>100] = 100
-        self.pred[self.pred<0] = 0
-        
+        # mask = np.full(self.pc.shape, True)
+
         self.params = opt.x
-        return self.pred
-    
+        return self.params
+
 class Kinetic(AbstractModel):
     def __init__(self, kv, pc):
         super().__init__(kv, pc)
 
-    def _compute(self, params, mask):
-        a,b = np.round(params, decimals=5)
-        return ((self.pc[mask]-self.pc_kvo)/((self.pc_vh-self.pc[mask]+1e-5)*a))**(1/b)+self.kvo
+    def _compute(self, params):
+        a,b = np.round(params, 5)
+        return ((self.pc-self.pc_kvo)/((self.pc_vh-self.pc+1e-5)*a))**(1/b)+self.kvo
     
-    def _loss(self, params, mask):
-        a,b = np.round(params, decimals=5)
-        result = self.kv[mask] - self._compute(params, mask)
-        return result
+    def _loss(self, params):
+        a,b = np.round(params, 5)
+        return self.kv - self._compute(params)
     
-    def predict(self, a=1, b=1):
-        #train
-        params = [a, b]
-        mask = (self.pc >= self.pc_vh)
-        opt = least_squares(self._loss, params, args=[mask], bounds=((0,1), (1,10)))
-        #predict
-        mask = (self.pc > self.pc_vh)
-        self.pred = self._compute(opt.x, mask)
-        self.pred[self.pred>100] = 100
-        self.pred[self.pred<0] = 0
-        
+    def fit(self, a=0.5, b=1.0):
+        params = [a,b]
+        b0 = (0,1.0)
+        b1 = (1.0,10.0)
+        opt = least_squares(self._loss, params, bounds = (b0, b1))
+
         self.params = opt.x
-        return self.pred
+        return self.params
+    
+    def predict(self, params):
+        return self._compute(params)
+        
+    
     
 class Optimal(AbstractModel):
     def __init__(self, kv, pc):
@@ -97,38 +99,33 @@ class Optimal(AbstractModel):
     def _loss(self, params):
         return self.kv - self._compute(params)
     
-    def predict(self, a=1, b=1):
+    def fit(self, a=1, b=1):
         #train
         params = [a, b]
         opt = least_squares(self._loss, params, bounds=((0,0), (1,1)))
-        #predict
-        self.pred = self._compute(opt.x)
-        self.pred[self.pred>100] = 100
-        self.pred[self.pred<0] = 0
-        
         self.params = opt.x
-        return self.pred
+
+        return self.params
 
 class Tomira(AbstractModel):
     def __init__(self, kv, pc):
         super().__init__(kv, pc)
     
     def _compute(self, G, mask):
+        if mask.any() == None:
+            mask = np.full(self.pc.shape, True)
         return self.kvo + (100-self.kvo)*(1- np.exp(G/np.log(self.pc_vh/(self.pc[mask] + 1e-6))))
     
     def _loss(self, G, mask):
         return self.kv[mask] - self._compute(G, mask)
     
-    def predict(self, G=1):
+    def fit(self, G=1):
         #train
         mask = (self.pc >= self.pc_vh)
         opt = least_squares(self._loss, G, args=[mask])
-        #predict
-        self.pred = self._compute(opt.x, mask)
-        self.pred[self.pred>100] = 100
-        self.pred[self.pred<0] = 0
+        self.params = opt.x
         
-        return self.pred
+        return self.params
     
 class Trigonometric(AbstractModel):
     def __init__(self, kv, pc):
@@ -141,14 +138,64 @@ class Trigonometric(AbstractModel):
     def _loss(self, params):
         return self.kv - self._compute(params)
     
-    def predict(self, A=2, B=2, C=2):
+    def fit(self, A=2, B=2, C=2):
         #train
         params = [A, B, C]
         opt = least_squares(self._loss, params, bounds=([0, 0.01, 0.1], [10, 10, 10]))
-        # opt, _ = curve_fit(_compute())
-        #predict
-        self.pred = self._compute(opt.x)
-        self.pred[self.pred>100] = 100
-        self.pred[self.pred<0] = 0
+        self.params = opt.x
         
-        return self.pred
+        return self.params
+    
+
+
+
+
+
+#depricated
+def plot_all_models(data, pc, model_name):
+    """
+    Function to iterate through all models, predict, and plot real and predicted curves.
+    """
+    num_models = len(data)
+    num_cols = 4
+    num_rows = math.ceil(num_models / num_cols)
+    
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=(20, 5 * num_rows))
+    axes = axes.flatten()  # Flatten the axes array for easy iteration
+    
+    for idx, num in enumerate(data.keys()):
+        mask = np.full(pc.shape, True)
+        match model_name:
+            case "BruxKori":   
+                model = BruxKori(data[num]["kv"], pc)
+            case "Kinetic":
+                model = Kinetic(data[num]["kv"], pc)
+                mask = (model.pc > model.pc_vh)
+            case "Optimal":
+                model = Optimal(data[num]["kv"], pc)
+            case "Tomira":
+                model = Tomira(data[num]["kv"], pc)
+                mask = (model.pc >= model.pc_vh)
+            case "Trigonometric":
+                model = Trigonometric(data[num]["kv"], pc)
+        
+        predicted = model.predict()
+        real = model.kv
+        
+        ax = axes[idx]
+        ax.plot(real, pc, marker="o", linestyle="-", label="Real")
+        ax.plot(predicted, pc[mask], marker="o", linestyle="--", label="Predicted")
+        
+        ax.set_xlabel("Kv, %")
+        ax.set_ylabel("Pc, МПа")
+        ax.set_yscale("log")
+        ax.set_title(f"Model {num}")
+        ax.hlines(y=model.pc_vh, xmin=30, xmax=100, label="pc_vh", colors="r")
+        ax.legend()
+    
+    # Hide unused subplots
+    for ax in axes[num_models:]:
+        ax.axis("off")
+    
+    plt.tight_layout()
+    plt.show()
